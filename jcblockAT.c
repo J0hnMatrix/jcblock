@@ -316,7 +316,7 @@ int send_timed_modem_command(int fd, char *command, int numSecs )
 //
 // Wait (forever!) for calls...
 //
-int wait_for_response(fd)
+int wait_for_response(int fd)
 {
   char buffer[255];     // Input buffers
   char buffer2[255];
