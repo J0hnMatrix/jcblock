@@ -316,7 +316,7 @@ int send_timed_modem_command(int fd, char *command, int numSecs )
 //
 // Wait (forever!) for calls...
 //
-int wait_for_response(int fd)
+int wait_for_response(fd)
 {
   char buffer[255];     // Input buffers
   char buffer2[255];
@@ -332,6 +332,10 @@ int wait_for_response(int fd)
   // Get a string of characters from the modem
   while(1)
   {
+    // After a call, sleep a bit before commanding the modem
+    usleep( 250000 );
+    // Make sure the modem is on hook
+    send_modem_command(fd, "ATH0\r"); // on hook
 
 #ifdef DEBUG
     // Flush anything in stdout (needed if stdout is redirected to
@@ -364,6 +368,7 @@ int wait_for_response(int fd)
       buffer[71] = 0;
     }
 
+
     // Replace '\n' and '\r' characters with '-' characters
     for( i = 0; i < nbytes; i++ )
     {
@@ -373,14 +378,19 @@ int wait_for_response(int fd)
        }
     }
 
-    // Put a '\n' at its end and null-terminate it
-    buffer[nbytes] = '\n';
-    buffer[nbytes + 1] = 0;
 
-#ifdef DEBUG
-    printf("nbytes: %d, str: %s", nbytes, buffer );
-#endif
 
+    if (strstr( buffer, "DATE" ) != NULL )
+      {
+	buffer[nbytes] = 0;
+
+      }
+    else{
+         // Put a '\n' at its end and null-terminate it 
+      buffer[nbytes] = '\n';
+      buffer[nbytes + 1] = 0;
+    }
+        
     // A string was received.
     // If its a 'RING' string, just count it.
     if( strstr( buffer, "RING" ) != NULL )
@@ -588,8 +598,7 @@ int wait_for_response(int fd)
         // continue to time the detection window and cancel the
         // blocked read thread if no *-key is entered.
 
-        // Create a thread to block for a *-key press. The code
-        // that runs in the thread is in blockForStarKey().
+        // Create a thread to block for a *-key press
         err = pthread_create(&(threadId), NULL,
 					 &blockForStarKey, NULL);
         if(err != 0) {
@@ -625,6 +634,12 @@ int wait_for_response(int fd)
         // If a *-key entry was detected...
         else if(gotStarKey)
         {
+	  char addStr[22] = "NAME = Cell Phone --\n\0";
+	  strcat(buffer2, addStr);
+ 
+#ifdef DEBUG
+	  printf ("Voici buffer 2 : %s",buffer2); 
+#endif
           gotStarKey = FALSE;
           // Write a caller ID entry to the blacklist.dat.
           if( write_blacklist( buffer2 ) == TRUE)
@@ -633,26 +648,21 @@ int wait_for_response(int fd)
             tag_and_write_callerID_record( buffer2, '*');
           }
         }
+
+        // Reinitialize the modem for caller ID operation
+        init_modem( fd );
+
+        // Send on/off/on hook commands to terminate call
+        // and send some "clicks" to the listener to indicate
+        // that the *-key window has closed.
+        usleep( 250000 );                 // quarter second
+        send_modem_command(fd, "ATH0\r"); // on hook
+        usleep( 250000 );                 // quarter second
+	// Note: the off/on hook commands were removed to
+	// solve the "off-hook-hang" bug (hopefully!)
+	// (January 10, 2016, W. S. Heath).
       }
     }                           // end of *-key check
-
-    // Note: Occasionally (i.e., a few months) the modem has
-    // hung in the off-hook state (green LED changes to yellow).
-    // This is a very hard problem to solve! The following
-    // attempts to solve it by completely reinitializing the
-    // modem after each call and then sending an on-hook command.
-    // If it is a hardware problem in the modem itself, this may
-    // fix it.
-    //
-    // Reinitialize the modem for caller ID operation
-    init_modem( fd );
-
-    // Send on-hook command to make sure the call is
-    // terminated.
-    usleep( 250000 );                 // quarter second
-    send_modem_command(fd, "ATH0\r"); // on-hook
-    usleep( 250000 );                 // quarter second
-
   }				// end of while(1) loop
 }
 
@@ -674,6 +684,12 @@ int tag_and_write_callerID_record( char *buffer, char tagChar)
     // Socket broadcast the buffer's contents.
     broadcast(buffer);
 #endif
+
+    if (tagChar != '*'){
+      
+      char addStr[12] = "NAME = O--\n\0";
+      strcat(buffer, addStr);
+    }
 
   // Close and re-open file 'callerID.dat' (in case it was
   // edited while the program was running!).
@@ -1322,4 +1338,3 @@ void* blockForStarKey(void *arg)
   }                         // end of while(TRUE)
   return NULL;
 }
-
